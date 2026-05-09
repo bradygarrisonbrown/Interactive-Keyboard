@@ -5,6 +5,7 @@ import os
 import csv
 from collections import defaultdict
 from datetime import datetime
+import motor_utils
 
 
 class TypingGame:
@@ -39,6 +40,7 @@ class TypingGame:
 
         self.scroll_x = 0
         self.scrolling = True
+        self.motors_active = False
 
         self.clock = pygame.time.Clock()
         self.running = True
@@ -100,7 +102,12 @@ class TypingGame:
     # Hardware hook (placeholder)
     # -------------------------
     def vibrate_key(self, key_pressed):
-        print(key_pressed)
+        if self.motors_active:
+            motor_utils.run_motor(key_pressed)
+        else:
+            print(key_pressed)
+
+    
 
     # -------------------------
     # Text loading
@@ -223,6 +230,10 @@ class TypingGame:
     # Finish game + calculate stats
     # -------------------------
     def finish_game(self):
+
+        if motors_active:
+            motor_utils.motor_cleanup()
+
         self.end_time = time.time()
         elapsed_minutes = (self.end_time - self.start_time) / 60
 
