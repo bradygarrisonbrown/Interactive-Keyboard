@@ -80,6 +80,11 @@ class TypingGame:
 
         self._char_width_cache = {}
 
+        # Paragraph mode scroll
+        self.para_scroll_y        = 0   # current vertical offset (pixels, grows upward)
+        self.para_scroll_target   = 0   # target offset we're easing toward
+        self.para_current_line_y  = 0   # y of the line the cursor is on
+
         # Vibrate the first key
         self.vibrate_key(self.excerpt[self.current_index])
 
@@ -257,15 +262,34 @@ class TypingGame:
         positions   = self.layout_text(self.excerpt, self.W - margin, margin, top)
         current_pos = None
 
+        # Find the y of the current character (before applying scroll)
+        if self.current_index < len(positions):
+            cur_raw_y = positions[self.current_index][2]
+
+            # When the cursor moves to a new line, update the scroll target so
+            # that line stays at `top`.
+            if cur_raw_y != self.para_current_line_y:
+                self.para_current_line_y = cur_raw_y
+                # Shift text up so the current line sits at `top`
+                self.para_scroll_target = cur_raw_y - top
+
+        # Smooth easing toward the target offset
+        self.para_scroll_y += (self.para_scroll_target - self.para_scroll_y) * 0.12
+
         for i, (char, x, y) in enumerate(positions):
+            draw_y = y - self.para_scroll_y
+            # Cull lines that have scrolled off-screen
+            if draw_y < -self.font.get_height() or draw_y > self.H + self.font.get_height():
+                continue
+
             if i < self.current_index:
                 color = (100, 100, 100)
             elif i == self.current_index:
-                current_pos = (x, y)
+                current_pos = (x, draw_y)
                 color = (0,255,0) if self.feedback=="correct" else (255,0,0) if self.feedback=="wrong" else (255,255,0)
             else:
                 color = (200, 200, 200)
-            self.screen.blit(self.font.render(char, True, color), (x, y))
+            self.screen.blit(self.font.render(char, True, color), (x, draw_y))
 
         self._update_sheeple(current_pos)
 
