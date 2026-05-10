@@ -1,29 +1,45 @@
 import time
+import threading
 import board
 import busio
 import RPi.GPIO as GPIO
 from adafruit_mcp230xx.mcp23017 import MCP23017
-
+ 
 # ── GPIO setup ────────────────────────────────────────────────────────────────
 GPIO.setmode(GPIO.BCM)
-
-def software_pwm(pin, duty_cycle, period=0.02, duration=2):
-    """Software PWM for MCP23017 pins (they don't support hardware PWM)."""
-    on_time = period * duty_cycle
+ 
+# Per-key cancel events: if run_motor is called for a key that is already
+# buzzing, the old thread sees its event set and exits early.
+_cancel_events: dict[str, threading.Event] = {}
+_cancel_lock = threading.Lock()
+ 
+# ── Software PWM (MCP pins) ───────────────────────────────────────────────────
+def _software_pwm(pin, duty_cycle, period=0.02, duration=2,
+                  cancel: threading.Event = None):
+    """
+    Bit-bang PWM for MCP23017 outputs.
+    Checks `cancel` between half-cycles so the thread can exit early.
+    """
+    on_time  = period * duty_cycle
     off_time = period * (1 - duty_cycle)
     end_time = time.time() + duration
     while time.time() < end_time:
+        if cancel and cancel.is_set():
+            break
         pin.value = True
         time.sleep(on_time)
+        if cancel and cancel.is_set():
+            break
         pin.value = False
         time.sleep(off_time)
-
+    pin.value = False   # always leave pin low when done
+ 
 # ── I2C + MCP chips ───────────────────────────────────────────────────────────
-i2c = busio.I2C(board.SCL, board.SDA)
+i2c  = busio.I2C(board.SCL, board.SDA)
 mcp1 = MCP23017(i2c, address=0x20)
 mcp2 = MCP23017(i2c, address=0x21)
-
-# ── MCP1 pins (A–N = motors 1–14) ────────────────────────────────────────────
+ 
+# ── MCP1 pins (A–P= motors 1–16) ────────────────────────────────────────────
 motor1  = mcp1.get_pin(0)   # GPA0
 motor2  = mcp1.get_pin(1)   # GPA1
 motor3  = mcp1.get_pin(2)   # GPA2
@@ -31,71 +47,70 @@ motor4  = mcp1.get_pin(3)   # GPA3
 motor5  = mcp1.get_pin(4)   # GPA4
 motor6  = mcp1.get_pin(5)   # GPA5
 motor7  = mcp1.get_pin(6)   # GPA6
-motor8  = mcp1.get_pin(7)   # GPB0
-motor9  = mcp1.get_pin(8)   # GPB1
-motor10 = mcp1.get_pin(9)   # GPB2
-motor11 = mcp1.get_pin(10)  # GPB3
-motor12 = mcp1.get_pin(11)  # GPB4
-motor13 = mcp1.get_pin(12)  # GPB5
-motor14 = mcp1.get_pin(13)  # GPB6
+motor8  = mcp1.get_pin(7)   # GPA7
 
-# ── MCP2 pins (O–Z = motors 15–26, skipping 27/28 which exceed A–Z) ──────────
-motor15 = mcp2.get_pin(0)   # GPA0
-motor16 = mcp2.get_pin(1)   # GPA1
-motor17 = mcp2.get_pin(2)   # GPA2
-motor18 = mcp2.get_pin(3)   # GPA3
-motor19 = mcp2.get_pin(4)   # GPA4
-motor20 = mcp2.get_pin(5)   # GPA5
-motor21 = mcp2.get_pin(6)   # GPA6
-motor22 = mcp2.get_pin(7)   # GPB0
-motor23 = mcp2.get_pin(8)   # GPB1
-motor24 = mcp2.get_pin(9)   # GPB2
-motor25 = mcp2.get_pin(10)  # GPB3
-motor26 = mcp2.get_pin(11)  # GPB4
-# motor27/28 available on mcp2.get_pin(12/13) but exceed A–Z; add to extras if needed
+motor9  = mcp1.get_pin(8)   # GPB0
+motor10 = mcp1.get_pin(9)   # GPB1
+motor11  = mcp1.get_pin(10)   # GPB2
+motor12  = mcp1.get_pin(11)   # GPB3
+motor13  = mcp1.get_pin(12)   # GPB4
+motor14  = mcp1.get_pin(13)   # GPB5
+motor15  = mcp1.get_pin(14)   # GPB6
+motor16  = mcp1.get_pin(15)   # GPB7
 
-# ── Set all MCP pins as outputs ───────────────────────────────────────────────
-for m in [motor1, motor2, motor3, motor4, motor5, motor6, motor7,
-          motor8, motor9, motor10, motor11, motor12, motor13, motor14,
-          motor15, motor16, motor17, motor18, motor19, motor20, motor21,
-          motor22, motor23, motor24, motor25, motor26]:
-    m.switch_to_output(value=False)
+ 
+# ── MCP2 pins (Q–Z . ; = motors 17–32) ───────────────────────────────────────────
+motor17  = mcp1.get_pin(0)   # GPA0
+motor18  = mcp1.get_pin(1)   # GPA1
+motor19  = mcp1.get_pin(2)   # GPA2
+motor20  = mcp1.get_pin(3)   # GPA3
+motor21  = mcp1.get_pin(4)   # GPA4
+motor22  = mcp1.get_pin(5)   # GPA5
+motor23  = mcp1.get_pin(6)   # GPA6
+motor24  = mcp1.get_pin(7)   # GPA7
+
+motor25  = mcp1.get_pin(8)   # GPB0
+motor26 = mcp1.get_pin(9)   # GPB1
+motor27  = mcp1.get_pin(10)   # GPB2
+motor28  = mcp1.get_pin(11)   # GPB3
+#motor29  = mcp1.get_pin(12)   # GPB4
+#motor30  = mcp1.get_pin(13)   # GPB5
+#motor31  = mcp1.get_pin(14)   # GPB6
+#motor32  = mcp1.get_pin(15)   # GPB7
+# motor27/28 on mcp2.get_pin(12/13) are available but exceed A–Z
+ 
+# ── Initialise all MCP pins as outputs ───────────────────────────────────────
+for _m in [motor1,  motor2,  motor3,  motor4,  motor5,  motor6,  motor7,
+           motor8,  motor9,  motor10, motor11, motor12, motor13, motor14,
+           motor15, motor16, motor17, motor18, motor19, motor20, motor21,
+           motor22, motor23, motor24, motor25, motor26, motor27, motor28]:
+    _m.switch_to_output(value=False)
+ 
 
 # ── GPIO hardware PWM pins ────────────────────────────────────────────────────
-# Usable GPIO pins (BCM), excluding SDA=2, SCL=3, and common reserved pins.
-# Mapped to: digits 0–9, then symbols for remaining pins.
-#
-#   Explicitly requested: 18, 23, 24, 25, 12, 16, 20, 21
-#   Additional usable GPIO (BCM): 4, 5, 6, 13, 17, 19, 22, 26, 27
-#
-# Key map:
+# Key map (BCM numbers):
 #   '0'=GPIO4   '1'=GPIO5   '2'=GPIO6   '3'=GPIO12  '4'=GPIO13
 #   '5'=GPIO16  '6'=GPIO17  '7'=GPIO18  '8'=GPIO19  '9'=GPIO20
 #   '!'=GPIO21  '@'=GPIO22  '#'=GPIO23  '$'=GPIO24  '%'=GPIO25
 #   '^'=GPIO26  '&'=GPIO27
-
 GPIO_PIN_MAP = {
     '0': 4,   '1': 5,   '2': 6,   '3': 12,  '4': 13,
     '5': 16,  '6': 17,  '7': 18,  '8': 19,  '9': 20,
     '!': 21,  '@': 22,  '#': 23,  '$': 24,  '%': 25,
     '^': 26,  '&': 27,
 }
-
-# Setup GPIO pins as outputs and create PWM objects (1 kHz)
+ 
 gpio_pwm = {}
-for key, bcm_pin in GPIO_PIN_MAP.items():
-    GPIO.setup(bcm_pin, GPIO.OUT)
-    pwm = GPIO.PWM(bcm_pin, 1000)
-    pwm.start(0)
-    gpio_pwm[key] = pwm
-
+for _key, _bcm in GPIO_PIN_MAP.items():
+    GPIO.setup(_bcm, GPIO.OUT)
+    _pwm = GPIO.PWM(_bcm, 1000)
+    _pwm.start(0)
+    gpio_pwm[_key] = _pwm
+ 
 # ── Letter → motor dictionary ─────────────────────────────────────────────────
-# Value: (pin_object_or_pwm_key, is_gpio)
-#   is_gpio=False → MCP pin, use software_pwm()
-#   is_gpio=True  → GPIO PWM object, use ChangeDutyCycle()
-
+# Value: (pin_or_pwm, is_gpio)
 MOTORS = {
-    # MCP motors A–Z
+    # MCP motors  A–Z , .
     'A': (motor1,  False),  'B': (motor2,  False),  'C': (motor3,  False),
     'D': (motor4,  False),  'E': (motor5,  False),  'F': (motor6,  False),
     'G': (motor7,  False),  'H': (motor8,  False),  'I': (motor9,  False),
@@ -104,94 +119,108 @@ MOTORS = {
     'P': (motor16, False),  'Q': (motor17, False),  'R': (motor18, False),
     'S': (motor19, False),  'T': (motor20, False),  'U': (motor21, False),
     'V': (motor22, False),  'W': (motor23, False),  'X': (motor24, False),
-    'Y': (motor25, False),  'Z': (motor26, False),
-
-    # GPIO motors: digits + symbols
-    '0': (gpio_pwm['0'], True),   # GPIO 4
-    '1': (gpio_pwm['1'], True),   # GPIO 5
-    '2': (gpio_pwm['2'], True),   # GPIO 6
-    '3': (gpio_pwm['3'], True),   # GPIO 12
-    '4': (gpio_pwm['4'], True),   # GPIO 13
-    '5': (gpio_pwm['5'], True),   # GPIO 16
-    '6': (gpio_pwm['6'], True),   # GPIO 17
-    '7': (gpio_pwm['7'], True),   # GPIO 18
-    '8': (gpio_pwm['8'], True),   # GPIO 19
-    '9': (gpio_pwm['9'], True),   # GPIO 20
-    '!': (gpio_pwm['!'], True),   # GPIO 21
-    '@': (gpio_pwm['@'], True),   # GPIO 22
-    '#': (gpio_pwm['#'], True),   # GPIO 23
-    '$': (gpio_pwm['$'], True),   # GPIO 24
-    '%': (gpio_pwm['%'], True),   # GPIO 25
-    '^': (gpio_pwm['^'], True),   # GPIO 26
-    '&': (gpio_pwm['&'], True),   # GPIO 27
+    'Y': (motor25, False),  'Z': (motor26, False), '.': (motor27, False),
+    ',': (motor28, False),
+    
+    # GPIO motors  0–9 and symbols
+    '0': (gpio_pwm['0'], True),  '1': (gpio_pwm['1'], True),
+    '2': (gpio_pwm['2'], True),  '3': (gpio_pwm['3'], True),
+    '4': (gpio_pwm['4'], True),  '5': (gpio_pwm['5'], True),
+    '6': (gpio_pwm['6'], True),  '7': (gpio_pwm['7'], True),
+    '8': (gpio_pwm['8'], True),  '9': (gpio_pwm['9'], True),
+    '!': (gpio_pwm['!'], True),  '@': (gpio_pwm['@'], True),
+    '#': (gpio_pwm['#'], True),  '$': (gpio_pwm['$'], True),
+    '%': (gpio_pwm['%'], True),  '^': (gpio_pwm['^'], True),
+    '&': (gpio_pwm['&'], True),
 }
-
-# ── run_motor ─────────────────────────────────────────────────────────────────
-def run_motor(letter, duty_cycle=0.1, duration=3):
-    """
-    Run a motor by its letter/symbol key.
-
-    Args:
-        letter:     Key from MOTORS dict (e.g. 'A', '7', '#').
-        duty_cycle: 0.0–1.0 for MCP software PWM;
-                    converted to 0–100 for GPIO hardware PWM.
-        duration:   How long to run the motor (seconds). Only applies to MCP.
-                    GPIO motors run until explicitly stopped.
-    """
-    if letter not in MOTORS:
-        print(f"Unknown motor key: '{letter}'")
-        return
-
+ 
+# ── Internal worker run on a background thread ────────────────────────────────
+def _motor_worker(letter, duty_cycle, duration, cancel):
     pin, is_gpio = MOTORS[letter]
-
     if is_gpio:
-        # Hardware PWM: duty_cycle 0.0–1.0 → 0–100%
         pin.ChangeDutyCycle(duty_cycle * 100)
-        time.sleep(duration)
-        pin.ChangeDutyCycle(0)
+        # Sleep in small increments so we can respond to cancel quickly
+        slept = 0.0
+        step  = 0.01
+        while slept < duration:
+            if cancel.is_set():
+                break
+            time.sleep(step)
+            slept += step
+        # Only turn off if we weren't cancelled — if we were, the new thread
+        # already owns this pin and will turn it off when it finishes.
+        if not cancel.is_set():
+            pin.ChangeDutyCycle(0)
     else:
-        # MCP software PWM
-        software_pwm(pin, duty_cycle=duty_cycle, duration=duration)
-        pin.value = False
-
+        _software_pwm(pin, duty_cycle=duty_cycle, duration=duration, cancel=cancel)
+ 
+# ── Public API ────────────────────────────────────────────────────────────────
+def run_motor(letter, duty_cycle=0.1, duration=2):
+    """
+    Start a motor on a background daemon thread.  Returns immediately so the
+    game loop is never blocked.
+ 
+    If the same key is still buzzing from a previous call, that buzz is
+    cancelled first and a fresh one starts — prevents pile-up when the same
+    key is pressed repeatedly.
+ 
+    Args:
+        letter:     Key in MOTORS (e.g. 'A', '1', 'O').
+        duty_cycle: 0.0–1.0  (converted to 0–100 % for GPIO hardware PWM).
+        duration:   Vibration length in seconds.
+    """
+    letter = letter.upper()
+    if letter not in MOTORS:
+        print(f"run_motor: unknown key '{letter}'")
+        return
+ 
+    with _cancel_lock:
+        # Cancel any in-flight buzz for this key
+        if letter in _cancel_events:
+            _cancel_events[letter].set()
+ 
+        cancel = threading.Event()
+        _cancel_events[letter] = cancel
+ 
+    t = threading.Thread(target=_motor_worker,
+                         args=(letter, duty_cycle, duration, cancel),
+                         daemon=True)
+    t.start()
+ 
+ 
 def stop_motor(letter):
-    """Immediately stop a motor."""
+    """Immediately stop a specific motor."""
+    letter = letter.upper()
     if letter not in MOTORS:
         return
+    with _cancel_lock:
+        if letter in _cancel_events:
+            _cancel_events[letter].set()
     pin, is_gpio = MOTORS[letter]
     if is_gpio:
         pin.ChangeDutyCycle(0)
     else:
         pin.value = False
-
-# ── Cleanup ───────────────────────────────────────────────────────────────────
+ 
+ 
 def motor_cleanup():
     """Stop all motors and release GPIO resources."""
-    for key, (pin, is_gpio) in MOTORS.items():
+    # Cancel every running thread
+    with _cancel_lock:
+        for ev in _cancel_events.values():
+            ev.set()
+        _cancel_events.clear()
+ 
+    for pin, is_gpio in MOTORS.values():
         if is_gpio:
-            pin.ChangeDutyCycle(0)
-            pin.stop()
+            try:
+                pin.ChangeDutyCycle(0)
+                pin.stop()
+            except Exception:
+                pass
         else:
-            pin.value = False
+            try:
+                pin.value = False
+            except Exception:
+                pass
     GPIO.cleanup()
-
-# ── Example usage ─────────────────────────────────────────────────────────────
-try:
-    while True:
-        print("ON")
-        run_motor('A', duty_cycle=0.1, duration=2)   # MCP motor 1
-        run_motor('O', duty_cycle=0.1, duration=2)   # MCP motor 15
-        run_motor('7', duty_cycle=0.1, duration=2)   # GPIO 18 (was led3)
-        time.sleep(1)
-
-        print("OFF")
-        # Motors auto-stop after duration, but explicit stop is safe too
-        stop_motor('A')
-        stop_motor('O')
-        stop_motor('7')
-        time.sleep(1)
-
-except KeyboardInterrupt:
-    pass
-finally:
-    motor_cleanup()
