@@ -111,16 +111,16 @@ for _key, _bcm in GPIO_PIN_MAP.items():
 # Value: (pin_or_pwm, is_gpio)
 MOTORS = {
     # MCP motors  A–Z , .
-    'X': (motor1,  False),  'F': (motor2,  False),  'C': (motor3,  False),
-    'Q': (motor4,  False),  'A': (motor5,  False),  'S': (motor6,  False),
-    'W': (motor7,  False),  'D': (motor8,  False),  'V': (motor9,  False),
+    'D': (motor1,  False),  'W': (motor2,  False),  'S': (motor3,  False),
+    'A': (motor4,  False),  'Q': (motor5,  False),  'C': (motor6,  False),
+    'F': (motor7,  False),  'X': (motor8,  False),  'V': (motor9,  False),
     'E': (motor10, False),  'G': (motor11, False),  'B': (motor12, False),
     'R': (motor13, False),  'T': (motor14, False),  'H': (motor15, False),
-    'N': (motor16, False),  'U': (motor17, False),  'Y': (motor18, False),
-    'I': (motor19, False),  'K': (motor20, False),  'P': (motor21, False),
-    'O': (motor22, False),  'L': (motor23, False),  '.': (motor24, False),
-    ',': (motor25, False),  'M': (motor26, False), 'T': (motor27, False),
-    'Z': (motor28, False),
+    'N': (motor16, False),  'Z': (motor17, False),  'T': (motor18, False),
+    'M': (motor19, False),  ',': (motor20, False),  '.': (motor21, False),
+    'L': (motor22, False),  'O': (motor23, False),  'P': (motor24, False),
+    'U': (motor25, False),  'Y': (motor26, False), 'I': (motor27, False),
+    'K': (motor28, False),
     
     # GPIO motors  0–9 and symbols
     '0': (gpio_pwm['0'], True),  '1': (gpio_pwm['1'], True),
